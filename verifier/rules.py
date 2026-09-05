@@ -338,7 +338,13 @@ def _normalise(raw: str, kind: str) -> tuple[float | None, str]:
     if kind == "rank":
         return number, "rank"
     if kind == "ratio":
-        return None, "ratio"  # compared by literal string instead
+        # Compare by value, not spelling: a CPI written "8.8/10" and "8.8/10.0"
+        # is the same claim, and string comparison flagged the reformatting as
+        # an unverified metric.
+        nums = re.findall(r"\d+(?:\.\d+)?", low)
+        if len(nums) == 2 and float(nums[1]):
+            return float(nums[0]) / float(nums[1]), "ratio"
+        return None, "ratio"
     return number, "count"
 
 
@@ -435,4 +441,23 @@ def word_number_metrics(text: str) -> list[Metric]:
         metrics.append(Metric(
             raw=m.group(1), kind="wordnum", value=float(_NUMBER_WORDS[word]),
             unit="count", context=_context(text, m.start(), m.end(), 70)))
+    return metrics
+
+
+def ratio_numerator_metrics(text: str) -> list[Metric]:
+    """The numerator of every ratio, as a standalone count.
+
+    Added to the MASTER's pool only, for the same reason as
+    :func:`word_number_metrics`: a master stating "CPI 8.8/10.0" supports a
+    tailored resume that writes "CPI 8.8", and without this the shortened form
+    is reported as an unverified metric. It can only remove a false positive,
+    never create a flag.
+    """
+    metrics: list[Metric] = []
+    ratio_pattern = dict(_METRIC_PATTERNS)["ratio"]
+    for m in re.finditer(ratio_pattern, text):
+        nums = re.findall(r"\d+(?:\.\d+)?", m.group(0))
+        if nums:
+            metrics.append(Metric(nums[0], "ratio_part", float(nums[0]), "count",
+                                  _context(text, m.start(), m.end(), 70)))
     return metrics

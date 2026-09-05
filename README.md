@@ -226,6 +226,11 @@ reproducible nor auditable.
 * **Rephrasing is allowed.** Rewording, compressing, merging and reordering
   bullets is expected and never flagged. Restating a number in an equivalent
   unit is also fine.
+* **CPI / CGPA is checked like any other metric.** An inflated grade (master
+  8.8/10.0, tailored 9.2/10.0) is flagged; the same grade rewritten as "8.8/10"
+  or a bare "8.8" is not, because ratios compare by value rather than spelling.
+  Converting it to a percentage ("88%") *is* flagged — correct arithmetic, but
+  the master never states it.
 * **Metrics are strict.** Every number in the tailored resume must already exist
   in the master, on the same accomplishment. New, altered, exaggerated and
   *derived* metrics are all flagged — correct arithmetic (`800ms→200ms` stated

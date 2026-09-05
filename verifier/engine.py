@@ -15,6 +15,7 @@ from .rules import (
     Metric,
     extract_metrics,
     strip_contact_noise,
+    ratio_numerator_metrics,
     word_number_metrics,
     find_exam_references,
     find_phone_numbers,
@@ -46,7 +47,8 @@ def analyse_master(master_doc: ParsedDocument) -> list[Metric]:
     """Harvest the master's metrics once and reuse for the whole batch."""
     clean = strip_contact_noise(master_doc.text)
     # Spelled-out numbers count as support: "a team of five" backs "5".
-    return extract_metrics(clean) + word_number_metrics(clean)
+    return (extract_metrics(clean) + word_number_metrics(clean)
+            + ratio_numerator_metrics(clean))
 
 
 def verify_one(

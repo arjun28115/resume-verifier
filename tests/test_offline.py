@@ -382,7 +382,8 @@ def _score(text: str, verifier=None, master: str = MASTER):
     full_master = master + "\n" + _FILLER
     return verify_one("r.txt", (text + "\n" + _FILLER).encode(), full_master,
                       rules.extract_metrics(rules.strip_contact_noise(full_master))
-                      + rules.word_number_metrics(full_master),
+                      + rules.word_number_metrics(full_master)
+                      + rules.ratio_numerator_metrics(full_master),
                       verifier, VerificationSettings())
 
 
@@ -885,6 +886,42 @@ def test_gate_failure_is_scored_and_named() -> None:
     assert report.status is Status.FAIL
     assert report.match_score == 100 - PENALTY_BANNED_EXAM, report.score_lines
     assert any("GATE" in line.label for line in report.score_lines), report.score_lines
+
+
+# --------------------------------------------------------------------------
+# CPI / CGPA
+# --------------------------------------------------------------------------
+
+_CPI_MASTER = "Aradhya Goel a@iitk.ac.in\nB.Tech IIT Kanpur CPI 8.8/10.0\n"
+
+
+def _cpi_flags(tailored: str) -> list[str]:
+    clean = rules.strip_contact_noise(_CPI_MASTER)
+    pool = (rules.extract_metrics(clean) + rules.word_number_metrics(clean)
+            + rules.ratio_numerator_metrics(clean))
+    return [m.raw for m in rules.unmatched_metrics(
+        rules.extract_metrics(rules.strip_contact_noise(tailored)), pool)]
+
+
+def test_inflated_cpi_is_caught() -> None:
+    """The point of the check: a grade that does not match the master."""
+    for bad in ("CPI 9.2/10.0", "CPI 9.2", "CPI 9.5/10"):
+        assert _cpi_flags(bad), f"inflated CPI not caught: {bad}"
+
+
+def test_reformatted_cpi_is_not_flagged() -> None:
+    """Same grade, different notation - must not read as an unverified metric.
+
+    Ratios used to be compared as literal strings, so "8.8/10" and a bare
+    "8.8" were both reported despite matching the master's "8.8/10.0".
+    """
+    for same in ("CPI 8.8/10.0", "CPI 8.8/10", "CPI 8.8", "CGPA 8.8/10.0"):
+        assert not _cpi_flags(same), f"honest CPI reformatting flagged: {same}"
+
+
+def test_cpi_converted_to_a_percentage_is_flagged() -> None:
+    """8.8/10 -> "88%" is a derived metric: correct arithmetic, not in the master."""
+    assert _cpi_flags("CPI 88%")
 
 
 if __name__ == "__main__":
