@@ -24,7 +24,7 @@ from .schema import ScoreLine, ResumeReport
 
 # Deduction weights.
 PENALTY_PHONE = 35
-PENALTY_JEE = 35
+PENALTY_BANNED_EXAM = 35
 PENALTY_PER_EXTRA_PAGE = 25   # per page OVER the configured limit
 PENALTY_HIGH = 12
 PENALTY_MEDIUM = 5
@@ -126,9 +126,11 @@ def compute_match_score(report: ResumeReport) -> tuple[int, list[ScoreLine], boo
     if report.has_phone:
         score -= PENALTY_PHONE
         lines.append(ScoreLine(label="Contains a phone number", delta=-PENALTY_PHONE))
-    if report.has_jee:
-        score -= PENALTY_JEE
-        lines.append(ScoreLine(label="Mentions a JEE rank", delta=-PENALTY_JEE))
+    if report.has_banned_exam:
+        score -= PENALTY_BANNED_EXAM
+        named = ", ".join(sorted({h.split(":")[0] for h in report.banned_exam_hits
+                                  if ":" in h})) or "an excluded exam"
+        lines.append(ScoreLine(label=f"Mentions {named}", delta=-PENALTY_BANNED_EXAM))
     if not report.within_page_limit and report.page_count > report.page_limit:
         extra = report.page_count - report.page_limit
         cost = PENALTY_PER_EXTRA_PAGE * extra

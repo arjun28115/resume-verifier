@@ -16,9 +16,10 @@ from .rules import (
     extract_metrics,
     strip_contact_noise,
     word_number_metrics,
-    find_jee_references,
+    find_exam_references,
     find_phone_numbers,
     find_rank_mentions,
+    DEFAULT_EXCLUDED_EXAMS,
     unmatched_metrics,
 )
 from .schema import Finding, ResumeReport, ScoreLine, Status
@@ -36,6 +37,9 @@ class VerificationSettings:
     strict_page_limit: bool = True   # over the limit is a FAIL, not a warning
     check_calendar_years: bool = False  # also verify dates like "2024"
     max_workers: int = 4
+    # Entrance exams barred from a tailored resume. See rules.EXAM_RULES
+    # for each exam's mode (banned outright vs only with a rank/score).
+    excluded_exams: tuple = DEFAULT_EXCLUDED_EXAMS
 
 
 def analyse_master(master_doc: ParsedDocument) -> list[Metric]:
@@ -101,13 +105,15 @@ def verify_one(
         doc.page_count <= settings.max_pages if doc.page_count else True)
 
     phone_hits = find_phone_numbers(doc.text)
-    jee_hits = find_jee_references(doc.text)
+    exam_hits = find_exam_references(doc.text, settings.excluded_exams)
     # Legitimate olympiad/contest ranks - reported for human review only.
-    rank_mentions = find_rank_mentions(doc.text)
+    rank_mentions = find_rank_mentions(doc.text, settings.excluded_exams)
     report.has_phone = bool(phone_hits)
-    report.has_jee = bool(jee_hits)
+    report.has_banned_exam = bool(exam_hits)
     report.phone_hits = [h.match for h in phone_hits]
-    report.jee_hits = [h.match for h in jee_hits]
+    report.banned_exam_hits = [f"{h.pattern}: {h.match}" if h.pattern not in
+                               ("rank_with_exam_context",) else h.match
+                               for h in exam_hits]
     report.rank_mentions = [f"{h.match} — {h.context}" for h in rank_mentions]
 
     for hit in phone_hits:
@@ -119,13 +125,13 @@ def verify_one(
             suggested_fix="Remove the phone number from the contact line. "
                           f"Context: ...{hit.context}...",
         ))
-    for hit in jee_hits:
+    for hit in exam_hits:
         report.findings.append(Finding(
             category="OTHER", severity="high", quote=hit.match,
-            issue="Strict exclusion violated: the tailored resume references a "
-                  "JEE rank / the JEE examination.",
+            issue=f"Strict exclusion violated: the tailored resume references "
+                  f"an excluded entrance exam ({hit.pattern}).",
             master_evidence="N/A - deterministic rule, not a master-resume check.",
-            suggested_fix="Delete the JEE mention. "
+            suggested_fix="Delete the mention. "
                           f"Context: ...{hit.context}...",
         ))
     if not report.within_page_limit:
@@ -157,7 +163,7 @@ def verify_one(
     # Drop lines already charged as a strict exclusion. A phone-number line has
     # no counterpart in the master by definition; reporting it again here would
     # double-report the same violation and double-charge it in the score.
-    excluded_text = [h.match for h in phone_hits] + [h.match for h in jee_hits]
+    excluded_text = [h.match for h in phone_hits] + [h.match for h in exam_hits]
     exclusion_lines = {
         r.raw for r in line_results
         if any(bad and bad in r.raw for bad in excluded_text)
@@ -208,7 +214,7 @@ def verify_one(
 
 def _decide_status(report: ResumeReport, settings: VerificationSettings) -> Status:
     """Auto-fail conditions first, then severity-based grading."""
-    if report.has_phone or report.has_jee:
+    if report.has_phone or report.has_banned_exam:
         return Status.FAIL
     if not report.within_page_limit and settings.strict_page_limit:
         return Status.FAIL

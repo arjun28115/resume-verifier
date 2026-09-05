@@ -102,7 +102,7 @@ def test_rank_mentions_never_change_the_verdict() -> None:
             "* AIR 10, Srinivasa Ramanujan Mathematics Competition (SRMC) 2025\n" + _FILLER)
     report = verify_one("olympiad.txt", body.encode(), body,
                         rules.extract_metrics(body), None, VerificationSettings())
-    assert not report.has_jee, report.jee_hits
+    assert not report.has_banned_exam, report.jee_hits
     assert len(report.rank_mentions) == 2, report.rank_mentions
     assert report.status is not Status.FAIL, report.headline()
 
@@ -254,7 +254,7 @@ def test_end_to_end_with_stubbed_llm() -> None:
         restore()
 
     assert report.status is Status.FAIL
-    assert report.has_phone and report.has_jee
+    assert report.has_phone and report.has_banned_exam
     assert report.llm_used
     # Deterministic findings + the LLM finding are merged into one list.
     assert report.blocking_count >= 3
@@ -441,13 +441,13 @@ def test_rephrasing_does_not_cost_points() -> None:
 
 
 def test_exclusions_and_findings_deduct() -> None:
-    from verifier.scoring import PENALTY_JEE, PENALTY_PHONE
+    from verifier.scoring import PENALTY_BANNED_EXAM, PENALTY_PHONE
 
     phone = _score("Ph: 9876543210\n- Built an LOB simulator in C++.")
     assert phone.match_score == 100 - PENALTY_PHONE, phone.score_lines
 
     jee = _score("- AIR 993 in JEE Mains 2024.\n- Built an LOB simulator in C++.")
-    assert jee.match_score == 100 - PENALTY_JEE, jee.score_lines
+    assert jee.match_score == 100 - PENALTY_BANNED_EXAM, jee.score_lines
 
     # An olympiad rank costs nothing *as an exclusion* when the master
     # supports it. (It is still metric-checked like any other claim - being a
@@ -461,7 +461,7 @@ def test_exclusions_and_findings_deduct() -> None:
     # And with no master support it is charged as an unverified metric, never
     # as a JEE violation.
     unsupported = _score("- All India Rank 14 in American Mathematics Competitions.")
-    assert not unsupported.has_jee
+    assert not unsupported.has_banned_exam
     assert any("metrics unmatched" in line.label for line in unsupported.score_lines)
 
 
@@ -836,6 +836,55 @@ def test_hyphenated_master_words_still_match() -> None:
         "* Materials characterization (SEM, TEM, XRD) coursework completed.", master)
     assert results, results
     assert results[0].level != "unsupported", (results[0].level, results[0].score)
+
+
+# --------------------------------------------------------------------------
+# GATE and the configurable exam list
+# --------------------------------------------------------------------------
+
+def test_gate_is_banned_on_any_mention() -> None:
+    """GATE is treated like JEE: the exam may not appear at all.
+
+    This deliberately fails a legitimate M.Tech credential line
+    ("Qualified Graduate Aptitude Test in Engineering (GATE)") - the rule is
+    about the exam being named, not about a rank being quoted.
+    """
+    for text in ["GATE AIR 245",
+                 "Qualified Graduate Aptitude Test in Engineering (GATE) - Physics",
+                 "GATE score 812"]:
+        assert rules.find_exam_references(text), f"missed GATE in {text!r}"
+
+
+def test_rank_only_exams_need_a_score_word() -> None:
+    """CAT/NEET are barred only when a rank or score is attached."""
+    with_score = rules.find_exam_references("CAT 99.8 percentile", ("CAT",))
+    assert with_score, "a CAT percentile should be flagged"
+    bare = rules.find_exam_references("Common Admission Test qualified", ("CAT",))
+    assert not bare, f"a bare CAT mention should be allowed: {[h.match for h in bare]}"
+
+
+def test_exam_list_is_configurable() -> None:
+    text = "Qualified GATE - Physics Paper 2024"
+    assert rules.find_exam_references(text, ("JEE", "GATE"))
+    assert not rules.find_exam_references(text, ("JEE",)), "GATE off = not flagged"
+
+
+def test_olympiad_ranks_survive_the_wider_exam_list() -> None:
+    """Adding GATE must not resurrect the olympiad false positive."""
+    for text in ["* All India Rank 14 in American Mathematics Competitions (AMC) 12A",
+                 "* AIR 10, Srinivasa Ramanujan Mathematics Competition (SRMC) 2025"]:
+        assert not rules.find_exam_references(text), text
+        assert rules.find_rank_mentions(text), text
+
+
+def test_gate_failure_is_scored_and_named() -> None:
+    from verifier.scoring import PENALTY_BANNED_EXAM
+
+    report = _score("- Qualified GATE - Physics (PH) Paper in 2024.")
+    assert report.has_banned_exam
+    assert report.status is Status.FAIL
+    assert report.match_score == 100 - PENALTY_BANNED_EXAM, report.score_lines
+    assert any("GATE" in line.label for line in report.score_lines), report.score_lines
 
 
 if __name__ == "__main__":

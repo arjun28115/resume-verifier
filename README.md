@@ -2,7 +2,7 @@
 
 Cross-checks tailored single-pager resumes against a **master resume** (the
 source of truth) and flags anything the master doesn't support: invented
-metrics, hallucinated experience, phone numbers, JEE ranks, over-length
+metrics, hallucinated experience, phone numbers, entrance-exam ranks, over-length
 documents — and resumes that belong to a different candidate entirely.
 
 Runs entirely on your own machine. **No API key is required** for the
@@ -46,7 +46,7 @@ Press **Ctrl+C** in the terminal to stop.
 
 ## What you get without an API key
 
-Everything deterministic: the identity gate, phone numbers, JEE ranks, the page
+Everything deterministic: the identity gate, phone numbers, excluded exams, the page
 limit, metric cross-checking, line-level subset matching, the annotated PDF
 side-by-side view, and the match score. This is **rule-only mode**, on by
 default when no key is present.
@@ -121,7 +121,7 @@ this repo writes a key to disk, and `.gitignore` excludes `secrets.toml` and
 
 | Verdict | Meaning |
 |---|---|
-| ❌ **FAIL** | Phone number, JEE rank, over the page limit, or any `high`-severity content finding |
+| ❌ **FAIL** | Phone number, an excluded entrance exam, over the page limit, or any `high`-severity content finding |
 | ⚠️ **WARNING** | Only `medium`/`low` findings; lines the deterministic pass could not match and no LLM has judged; or the LLM leg was attempted and errored |
 | ✅ **PASS** | Fully supported by the master resume. Shown as **PASS\*** in rule-only mode — it passed every check that ran, but hallucinated skills and altered wording were never examined. |
 
@@ -191,7 +191,7 @@ can always be traced to the lines that produced it.
 | Deduction | Cost |
 |---|---|
 | Phone number present | −35 |
-| JEE rank present | −35 |
+| Excluded entrance exam present | −35 |
 | Each page over the limit | −25 |
 | Each high-severity finding | −12 |
 | Each medium / low finding | −5 / −2 |
@@ -240,15 +240,27 @@ pages is normal. The limit is therefore a setting (**Maximum pages allowed**,
 default **2**), not a hardcoded rule, and whether exceeding it fails or merely
 warns is a separate toggle. Only pages *over* the limit are charged.
 
-### On the JEE rule specifically
+### On the entrance-exam rule
 
-The exclusion is a **JEE rank**, not the word "rank". An "All India Rank" or
-"AIR" is only treated as a JEE rank when JEE context appears in the *same
-bullet* — so "AIR 993 in JEE Mains 2024" fails, while "All India Rank 14 in
-American Mathematics Competitions" does not. Non-JEE rank claims are listed in
-the report as informational context and never affect the verdict. Bullet-level
-scoping is deliberate: a character window would leak "JEE" from one bullet into
-the next.
+Which exams are excluded is configurable in the sidebar. Each has a mode:
+
+| Exam | Default | Mode |
+|---|---|---|
+| **JEE** | on | banned on **any** mention |
+| **GATE** | on | banned on **any** mention |
+| CAT / NEET | off | banned only when a rank, score or percentile is attached |
+
+GATE being any-mention means a legitimate M.Tech credential line — *"Qualified
+Graduate Aptitude Test in Engineering (GATE)"* — also fails. That is the
+placement office's rule as specified: the exam may not be named at all. Switch
+it to `rank_only` in `verifier/rules.py::EXAM_RULES` if that should change.
+
+The word **"rank" alone is never the trigger.** An "All India Rank" or "AIR" is
+only an exam rank when an excluded exam is named in the *same bullet* — so "AIR
+993 in JEE Mains 2024" fails, while "All India Rank 14 in American Mathematics
+Competitions" does not. Non-exam rank claims are listed as informational context
+and never affect the verdict. Bullet-level scoping is deliberate: a character
+window would leak "JEE" from one bullet into the next.
 
 The full rulebook lives in `verifier/prompts.py::SYSTEM_RULES`.
 

@@ -93,9 +93,9 @@ class ResumeReport(BaseModel):
     within_page_limit: bool = True
     page_limit: int = 2
     has_phone: bool = False
-    has_jee: bool = False
+    has_banned_exam: bool = False
     phone_hits: list[str] = Field(default_factory=list)
-    jee_hits: list[str] = Field(default_factory=list)
+    banned_exam_hits: list[str] = Field(default_factory=list)
     rank_mentions: list[str] = Field(
         default_factory=list,
         description="Non-JEE All India Rank claims - informational, never a failure",
@@ -129,8 +129,8 @@ class ResumeReport(BaseModel):
         bits: list[str] = []
         if self.has_phone:
             bits.append("phone number present")
-        if self.has_jee:
-            bits.append("JEE rank mentioned")
+        if self.has_banned_exam:
+            bits.append("excluded exam mentioned")
         if not self.within_page_limit:
             bits.append(f"{self.page_count} pages (limit {self.page_limit})")
         if self.blocking_count:

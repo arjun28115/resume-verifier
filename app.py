@@ -25,6 +25,7 @@ from verifier.engine import VerificationSettings, verify_batch
 from verifier.fetch import FetchError, fetch_document, fetch_many, parse_url_list
 from verifier.llm import ANTHROPIC_MODELS, EFFORT_LEVELS, OPENAI_MODELS, build_verifier
 from verifier.pdf_utils import parse_upload
+from verifier.rules import DEFAULT_EXCLUDED_EXAMS, EXAM_RULES
 from verifier.schema import ResumeReport, Status
 from verifier.scoring import band_for_report, describe_score
 
@@ -126,7 +127,7 @@ def reports_to_dataframe(reports: list[ResumeReport]) -> pd.DataFrame:
             "File": _short(r.filename),
             "Pages": r.page_count or "-",
             "Phone": "❌ found" if r.has_phone else "✅ clean",
-            "JEE/AIR": "❌ found" if r.has_jee else "✅ clean",
+            "Exams": "❌ found" if r.has_banned_exam else "✅ clean",
             "Coverage": ("—" if r.identity_match is False
                          else f"{r.coverage:.0%}"),
             "Critical": r.blocking_count,
@@ -187,14 +188,14 @@ def render_report(report: ResumeReport) -> None:
             st.warning(warning)
 
         # --- Hard exclusions -------------------------------------------
-        if report.has_phone or report.has_jee or not report.within_page_limit:
+        if report.has_phone or report.has_banned_exam or not report.within_page_limit:
             st.markdown("##### 🚫 Strict exclusions")
             if report.has_phone:
                 st.error("**Contains a phone number:** "
                          + ", ".join(f"`{h}`" for h in report.phone_hits))
-            if report.has_jee:
-                st.error("**Mentions a JEE rank:** "
-                         + ", ".join(f"`{h}`" for h in report.jee_hits))
+            if report.has_banned_exam:
+                st.error("**Mentions an excluded entrance exam:** "
+                         + ", ".join(f"`{h}`" for h in report.banned_exam_hits))
             if not report.within_page_limit:
                 st.error(f"**Over the page limit:** {report.page_count} pages "
                          f"(limit {report.page_limit}).")
@@ -330,6 +331,12 @@ max_pages = st.sidebar.number_input(
     "Maximum pages allowed", min_value=1, max_value=10, value=2, step=1,
     help="A \"single-pager\" is the short-resume format, not literally one "
          "sheet - two pages is common. Set your own house rule here.")
+excluded_exams = st.sidebar.multiselect(
+    "Entrance exams to exclude", options=list(EXAM_RULES.keys()),
+    default=list(DEFAULT_EXCLUDED_EXAMS),
+    help="JEE and GATE are barred on any mention. CAT and NEET are barred only "
+         "when a rank, score or percentile is attached — deselect or add as your "
+         "house rules require.")
 strict_page_limit = st.sidebar.checkbox(
     "Exceeding the page limit is an auto-fail", value=True,
     help="Off: going over the limit is a warning instead of a failure.")
@@ -377,9 +384,9 @@ else:
 
 st.title("🧾 Smart Resume Verification Tool")
 st.markdown(
-    "Cross-check tailored single-page resumes against your **master resume**. "
+    "Cross-check tailored single-pager resumes against your **master resume**. "
     "Rephrasing is allowed — invented metrics, hallucinated experience, phone "
-    "numbers and JEE ranks are not."
+    "numbers and entrance-exam ranks are not."
 )
 
 # Resolve the master resume from whichever input was used.
@@ -486,6 +493,7 @@ if st.button("🔎 Verify resumes", type="primary", disabled=not ready):
 
     settings = VerificationSettings(
         max_pages=int(max_pages),
+        excluded_exams=tuple(excluded_exams),
         strict_page_limit=strict_page_limit,
         check_calendar_years=check_years,
         max_workers=max_workers,

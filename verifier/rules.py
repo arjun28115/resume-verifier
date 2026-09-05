@@ -40,25 +40,38 @@ _PHONE_PATTERNS: list[tuple[str, str]] = [
 # Hard exclusion 2: JEE rank / All India Rank
 # --------------------------------------------------------------------------
 
-# An explicit JEE mention is unambiguous - flag it wherever it appears.
-_JEE_EXPLICIT: list[tuple[str, str]] = [
-    ("jee", r"(?i)\bJEE\b"),
-    ("iit_jee", r"(?i)\bIIT[\s\-]?JEE\b"),
-    ("joint_entrance", r"(?i)\bJoint\s+Entrance\s+Exam(?:ination)?\b"),
-]
+# Entrance-exam exclusions.
+#
+# JEE and GATE are both banned on any mention, per the placement office's rule.
+# Note the consequence: a legitimate M.Tech credential line such as "Qualified
+# Graduate Aptitude Test in Engineering (GATE)" fails too, because the rule is
+# about the exam appearing at all, not about a rank being quoted. That is a
+# deliberate choice - flip an exam to "rank_only" below if it should instead be
+# barred only when a rank/score/percentile is attached.
+EXAM_RULES: dict[str, tuple[str, str]] = {
+    "JEE": (r"(?i)\b(?:JEE|IIT[\s\-]?JEE|Joint\s+Entrance\s+Exam(?:ination)?)\b", "any"),
+    "GATE": (r"(?i)\b(?:GATE|Graduate\s+Aptitude\s+Test\s+in\s+Engineering)\b", "any"),
+    "CAT": (r"(?i)\b(?:CAT|Common\s+Admission\s+Test)\b", "rank_only"),
+    "NEET": (r"(?i)\bNEET\b", "rank_only"),
+}
 
-# "AIR 10" / "All India Rank 3" on their own are NOT JEE ranks. Candidates
-# legitimately hold All India Ranks in olympiads and subject contests
-# ("All India Rank 14 in American Mathematics Competitions"), and failing a
-# resume for those was a false positive. A rank phrase is only treated as a JEE
-# rank when JEE context appears in the SAME bullet/line.
+DEFAULT_EXCLUDED_EXAMS = ("JEE", "GATE")
+
+# Words that turn an exam mention into a rank/score claim (for "rank_only").
+_SCORE_CONTEXT = (r"(?i)\b(?:rank|air|score|percentile|marks|topper|secured|"
+                  r"qualified\s+with)\b")
+
+# "AIR 10" / "All India Rank 3" on their own are NOT exam ranks. Candidates
+# legitimately hold All India Ranks in olympiads and subject contests, and
+# failing a resume for those was a false positive. A rank phrase counts only
+# when an excluded exam is named in the SAME bullet/line.
 _RANK_PHRASE = (r"(?i)\b(?:A\.?\s?I\.?\s?R\.?|All[\s\-]?India\s+Rank)"
                 r"\s*[:\-#]?\s*\d[\d,]*")
 
-# Deliberately narrow. A bare "Advanced" is excluded - it appears in plenty of
-# non-JEE competition names, and a rank with genuinely ambiguous context is
-# surfaced as an informational rank mention instead of an auto-fail.
-_JEE_CONTEXT = r"(?i)\b(?:JEE|Joint\s+Entrance|IIT[\s\-]?JEE|Mains)\b"
+# Extra context that implies JEE without naming it ("AIR 993 in Mains 2024").
+# Deliberately narrow - a bare "Advanced" appears in plenty of non-JEE
+# competition names.
+_EXTRA_EXAM_CONTEXT = r"(?i)\bMains\b"
 
 
 @dataclass
@@ -137,55 +150,85 @@ def _segment_bounds(text: str, start: int, end: int) -> tuple[int, int]:
     return left, right
 
 
-def find_jee_references(text: str) -> list[RuleHit]:
-    """Detect JEE rank references only.
+def _exam_context_re(exams) -> "re.Pattern":
+    """A regex matching any enabled exam's name, for rank-proximity checks.
 
-    Two tiers:
-      1. an explicit JEE / IIT-JEE / Joint Entrance mention, anywhere;
-      2. an AIR / All India Rank phrase whose own bullet also carries JEE
-         context (catches "AIR 993 in Mains 2024" without the word JEE).
+    The per-exam patterns carry an inline ``(?i)``; a global flag is only legal
+    at the start of an expression, so it is stripped before the alternation is
+    built and applied as a compile flag instead.
+    """
+    parts = [EXAM_RULES[e][0] for e in exams if e in EXAM_RULES]
+    parts.append(_EXTRA_EXAM_CONTEXT)
+    stripped = [p.replace("(?i)", "") for p in parts]
+    return re.compile("|".join(f"(?:{p})" for p in stripped), re.IGNORECASE)
 
-    A rank phrase with no JEE context is NOT returned here - see
+
+def find_exam_references(text: str, exams=DEFAULT_EXCLUDED_EXAMS) -> list[RuleHit]:
+    """Detect references to excluded entrance exams.
+
+    Three tiers:
+      1. an exam whose mode is "any", mentioned anywhere;
+      2. an exam whose mode is "rank_only", when its own bullet also carries a
+         rank/score word;
+      3. an AIR / All India Rank phrase whose bullet names an excluded exam
+         (catches "AIR 993 in Mains 2024" without the word JEE).
+
+    A rank phrase with no exam context is NOT returned here - see
     :func:`find_rank_mentions`.
     """
     hits: list[RuleHit] = []
     claimed: set[int] = set()
 
-    for pattern_name, pattern in _JEE_EXPLICIT:
+    for exam in exams:
+        rule = EXAM_RULES.get(exam)
+        if not rule:
+            continue
+        pattern, mode = rule
         for m in re.finditer(pattern, text):
             start, end = m.span()
             if any(i in claimed for i in range(start, end)):
                 continue
+            if mode == "rank_only":
+                left, right = _segment_bounds(text, start, end)
+                if not re.search(_SCORE_CONTEXT, text[left:right]):
+                    continue    # a bare qualification mention is allowed
             claimed.update(range(start, end))
-            hits.append(RuleHit("jee", pattern_name, m.group(0).strip(),
+            hits.append(RuleHit("exam", exam, m.group(0).strip(),
                                 _context(text, start, end)))
 
+    context_re = _exam_context_re(exams)
     for m in re.finditer(_RANK_PHRASE, text):
         start, end = m.span()
         if any(i in claimed for i in range(start, end)):
             continue
         left, right = _segment_bounds(text, start, end)
-        if re.search(_JEE_CONTEXT, text[left:right]):
+        if context_re.search(text[left:right]):
             claimed.update(range(start, end))
-            hits.append(RuleHit("jee", "rank_with_jee_context", m.group(0).strip(),
-                                _context(text, start, end)))
+            hits.append(RuleHit("exam", "rank_with_exam_context",
+                                m.group(0).strip(), _context(text, start, end)))
     return hits
 
 
-def find_rank_mentions(text: str) -> list[RuleHit]:
-    """AIR / All India Rank claims with NO JEE context in their bullet.
+def find_jee_references(text: str) -> list[RuleHit]:
+    """Backwards-compatible alias: JEE only."""
+    return find_exam_references(text, ("JEE",))
+
+
+def find_rank_mentions(text: str, exams=DEFAULT_EXCLUDED_EXAMS) -> list[RuleHit]:
+    """AIR / All India Rank claims with NO excluded-exam context in their bullet.
 
     Informational only. These are legitimate achievements (olympiads, subject
     contests) and must never fail a resume, but they are surfaced so a human
-    reviewer can eyeball anything the JEE rule deliberately let through.
+    reviewer can eyeball anything the exam rule deliberately let through.
     """
+    context_re = _exam_context_re(exams)
     mentions: list[RuleHit] = []
     for m in re.finditer(_RANK_PHRASE, text):
         start, end = m.span()
         left, right = _segment_bounds(text, start, end)
-        if re.search(_JEE_CONTEXT, text[left:right]):
+        if context_re.search(text[left:right]):
             continue
-        mentions.append(RuleHit("rank_mention", "non_jee_rank", m.group(0).strip(),
+        mentions.append(RuleHit("rank_mention", "non_exam_rank", m.group(0).strip(),
                                 _context(text, start, end)))
     return mentions
 
@@ -308,7 +351,7 @@ def strip_contact_noise(text: str) -> str:
     metric", duplicating a finding the user already has.
     """
     redacted = text
-    for hit in find_phone_numbers(text) + find_jee_references(text):
+    for hit in find_phone_numbers(text) + find_exam_references(text):
         redacted = redacted.replace(hit.match, " " * len(hit.match))
     return redacted
 
