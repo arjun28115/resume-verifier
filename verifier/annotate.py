@@ -29,9 +29,14 @@ def annotate_pdf(pdf_bytes: bytes, line_results, metric_lines: set[str] | None =
     a changed number barely moves a fuzzy score.
     """
     try:
-        import fitz
+        # `import fitz` is the deprecated alias and prints a warning on
+        # newer PyMuPDF; prefer the real package name.
+        import pymupdf as fitz
     except ImportError:
-        return None
+        try:
+            import fitz
+        except ImportError:
+            return None
 
     metric_lines = metric_lines or set()
     exclusion_lines = exclusion_lines or set()

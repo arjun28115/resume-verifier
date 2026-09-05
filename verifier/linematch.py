@@ -81,9 +81,14 @@ def extract_pdf_lines(data: bytes) -> list[tuple[str, int, tuple]]:
     callers fall back to plain text lines (no annotation, matching still works).
     """
     try:
-        import fitz
+        # `import fitz` is the deprecated alias and prints a warning on
+        # newer PyMuPDF; prefer the real package name.
+        import pymupdf as fitz
     except ImportError:
-        return []
+        try:
+            import fitz
+        except ImportError:
+            return []
 
     lines: list[tuple[str, int, tuple]] = []
     try:
