@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Secrets - never commit an API key
+.streamlit/secrets.toml
+.env
+
+# Local scratch
+uploads/
+output/
+*.pdf
+!docs/*.pdf
+.DS_Store
+
+# Editor/agent tooling and Streamlit's auto-created skill symlinks, which
+# point into a local Python install and would be broken for anyone else.
+.claude/
+.agents/

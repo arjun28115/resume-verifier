@@ -1,0 +1,19 @@
+# ---- Core app ----
+streamlit>=1.36.0
+streamlit-pdf>=0.1            # inline PDF viewer (st.pdf); falls back to <embed>
+
+# ---- PDF parsing ----
+pdfplumber>=0.11.0        # primary text extractor (layout-aware)
+pypdf>=4.2.0              # fallback extractor + reliable page counting
+
+# ---- Line-level subset matching + PDF annotation ----
+pymupdf>=1.24.0           # draws the highlights on the tailored resume
+rapidfuzz>=3.0.0          # fuzzy line matching against the master
+
+# ---- LLM providers (install at least one) ----
+anthropic>=1.0.0          # needed for output_config / adaptive thinking / effort
+openai>=1.40.0            # optional alternative provider
+
+# ---- Validation & display ----
+pydantic>=2.7.0
+pandas>=2.2.0

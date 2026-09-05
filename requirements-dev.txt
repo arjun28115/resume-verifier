@@ -1,0 +1,4 @@
+# Only needed to run the test suite (tests/test_offline.py).
+# The app itself does not need these.
+-r requirements.txt
+reportlab>=4.0            # generates multi-page PDFs for the page-limit tests
