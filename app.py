@@ -535,8 +535,9 @@ if reports:
     st.caption(f"Strongest match: **{_short(best.filename)}** "
                f"({best.match_score}/100)")
 
-    st.dataframe(reports_to_dataframe(reports), use_container_width=True,
-                 hide_index=True)
+    # `use_container_width` is deprecated (removal was slated for 2025-12-31)
+    # and logs a warning on every rerun; `width="stretch"` is the replacement.
+    st.dataframe(reports_to_dataframe(reports), width="stretch", hide_index=True)
 
     st.subheader("Detailed findings")
     for report in sorted(reports, key=lambda r: (r.match_score, r.filename)):
